@@ -1,0 +1,3 @@
+Project-Name: feature-evolution
+Source: src/main/rascal
+Require-Libraries: |lib://rascal-git|,|lib://php-analysis|
