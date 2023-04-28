@@ -16,14 +16,9 @@ import Set;
 import List;
 import ValueIO;
 import IO;
-
-// Other items to add:
-// How much code is in classes?
-// What is the average longevity of a class? Of a method?
-// Interfaces?
-// Exceptions: how many throws? how many try/catch blocks? how many catches?
-// Namespaces: are they being used? is code being transitioned to this?
-// Closures? (Not really OO, but may be interesting)
+import DateTime;
+import Map;
+import util::Math;
 
 // NOTE: This is the location of this project. You should
 // change this to match the location on your system. This
@@ -598,255 +593,577 @@ public list[int] getNumbersForSystem(Summary s) {
 	return stats + varStats + magicStats + includeStats + evalStats + invokeStats;	
 }
 
-public list[str] getColumnHeaders() {
-	list[str] res = [ "System", "Version", "SLOC", "Files", "Exprs", "Stmts", 
-		"Variable Variables", "Variable Function Calls", "Variable Method Calls", "Variable News", "Variable Properties",
-		"Variable Class Constants", "Variable Static Calls", "Variable Static Targets", "Variable Static Properties", "Variable Static Property Targets",
-		"All Variable Features",
-		"Magic Sets", "Magic Gets", "Magic isSets", "Magic Unsets", "Magic Calls", "Magic Static Calls",
-		"All Magic Methods",
-		"Total Includes", "Dynamic Includes",
-		"Eval", "Create Function Uses", "All Eval Features",
-		"CallUserFunc", "CallUserFuncArray", "CallUserMethod", "CallUserMethodArray",
-		"All Dynamic Invocations"];
-	return res;
+private lrel[num,num] computeCoords(lrel[num,num] inputs) {
+	return [ < idx, j > | <idx, j> <- inputs ];
 }
 
-public str generateNumbersFile(set[str] systems) {
-	str res = intercalate(",",getColumnHeaders()) + "\n";
-	slocInfo = sloc();
-	for (s <- sort(toList(systems)), v <- getSortedVersions(s)) {
-		< lineCount, fileCount > = getOneFrom(slocInfo[s,v]);
-		res = res + "<s>,<v>,<lineCount>,<fileCount>,<intercalate(",",getNumbersForSystem(readSummary(s,v)))>\n";
-	}
-	return res;
-}
-
-public void writeNumbersFile(set[str] systems) {
-	for (s <- systems) {
-		fileText = generateNumbersFile({s});
-		writeFile(|project://SANER%202015/src/lang/php/experiments/saner2015/dynamic-<s>.csv|, fileText);
-	}
-}
-
-private lrel[num,num] computeCoords(list[num] inputs) {
-	return [ < idx+1, inputs[idx] > | idx <- index(inputs) ];
-}
-
-str computeTicks(str s) {
-	vlist = getSortedVersions(s);
-	displayThese = [ idx+1 | idx <- index(vlist), ((idx+1)%10==1) || (idx==size(vlist)-1) ];
+str computeXTicks(list[int] tickIndex) {
+	displayThese = [ idx | idx <- tickIndex ];
 	return "xtick={<intercalate(",",displayThese)>}";
 }
 
-str computeTickLabels(str s) {
-	vlist = getSortedVersions(s);
-	displayThese = [ vlist[idx] | idx <- index(vlist), ((idx+1)%10==1) || (idx==size(vlist)-1) ];
+str cleanUpLabel(str l) {
+	if (startsWith(l, "release-")) {
+		return substring(l, size("release-"));
+	} else if (startsWith(l, "v")) {
+		return substring(l, size("v"));
+	}
+	return l;
+}
+
+str computeTickLabels(list[str] vlist, list[int] tickIndex) {
+	displayThese = [ cleanUpLabel(vlist[idx]) | idx <- tickIndex ];
 	return "xticklabels={<intercalate(",",displayThese)>}";
 }
 
-private str makeCoords(list[num] inputs, str mark="", str markExtra="", str legend="") {
-	return "\\addplot<if(size(mark)>0){>[mark=<mark><if(size(markExtra)>0){>,<markExtra><}>]<}> coordinates {
+private str makeCoords(lrel[num,num] inputs, str mark="", list[str] markExtra=[ ], str legend="", str label="", bool dashed=false) {
+	list[str] extrasList = markExtra;
+	if (size(mark) > 0) {
+		extrasList = "mark=<mark>" + extrasList;
+	}
+	if (dashed) {
+		extrasList = extrasList + "dashed";
+	}
+	str extras = intercalate(",",extrasList);
+
+	return "\\addplot+<if(size(extras)>0){>[<extras>]<}> coordinates {
 		   '<intercalate(" ",[ "(<i>,<j>)" | < i,j > <- computeCoords(inputs)])>
 		   '};<if(size(legend)>0){>
-		   '\\addlegendentry{<legend>}<}>";
+		   '\\addlegendentry{<legend>}\n<}><if(size(label)>0){>
+		   '\\label{<label>}\n<}>";
 }
 
-public str varFeaturesChart(map[str,map[str,Summary]] smap, str s, str title="Variable Features", str label="fig:VarFeatures", str markExtra="") {
-	list[str] coordinateBlocks = [ ];
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varVar | v <- getSortedVersions(s), v in smap[s] ], mark="square", markExtra=markExtra, legend="Variables");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varFCall | v <- getSortedVersions(s), v in smap[s] ], mark="x", markExtra=markExtra, legend="Function Calls");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varMCall | v <- getSortedVersions(s), v in smap[s] ], mark="o", markExtra=markExtra, legend="Method Calls");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varNew | v <- getSortedVersions(s), v in smap[s] ], mark="+", markExtra=markExtra, legend="Object Creation");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varProp | v <- getSortedVersions(s), v in smap[s] ], mark="*", markExtra=markExtra, legend="Property Uses");
-
-	int maxcoord(str s) {
-		return max([ smap[s][v].varFeatures.varVar | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].varFeatures.varFCall | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].varFeatures.varMCall | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].varFeatures.varNew | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].varFeatures.varProp | v <- getSortedVersions(s), v in smap[s] ]) + 10;
+public map[str, VarFeatureCounts] getVarFeatureCountsMap(str s, set[str] vs) {
+	map[str, VarFeatureCounts] counts = ( );
+	for (v <- vs) {
+		vsum = readSummary(s,v);
+		counts[v] = getVarFeatureCounts(vsum.varFeatures);
 	}
-		
-	str res = "\\begin{figure*}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\textwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>]
+	return counts;
+} 
+
+public map[str, MagicMethodCounts] getMagicMethodCountsMap(str s, set[str] vs) {
+	map[str, MagicMethodCounts] counts = ( );
+	for (v <- vs) {
+		msum = readSummary(s,v);
+		counts[v] = getMagicMethodCounts(msum.magicMethods);
+	}
+	return counts;
+} 
+
+public map[str, EvalLikeCounts] getEvalCountsMap(str s, set[str] vs) {
+	map[str, EvalLikeCounts] counts = ( );
+	for (v <- vs) {
+		esum = readSummary(s,v);
+		counts[v] = getEvalLikeCounts(esum.evalLikes);
+	}
+	return counts;
+}
+
+public map[str, InvocationCounts] getInvocationCountsMap(str s, set[str] vs) {
+	map[str, InvocationCounts] counts = ( );
+	for (v <- vs) {
+		isum = readSummary(s,v);
+		counts[v] = getInvocationCounts(isum.invocations);
+	}
+	return counts;
+} 
+
+public list[int] computeTickIndexesByDate(list[str] sortedTags, rel[str,datetime] dates, int monthsApart=3) {
+	list[int] tickIndex = [0];
+	for (i <- index(sortedTags)) {
+		tagDate = getOneFrom(dates[sortedTags[i]]);
+		priorDate = getOneFrom(dates[sortedTags[tickIndex[-1]]]);
+		if ( (tagDate.year == priorDate.year && tagDate.month >= (priorDate.month+monthsApart)) || tagDate.year > priorDate.year) {
+			tickIndex = tickIndex + i;
+		}
+	}
+	if (tickIndex[-1] != size(sortedTags)-1) {
+		tickIndex = tickIndex + (size(sortedTags)-1);
+	}
+	return tickIndex;
+}
+
+public list[int] computeTickIndexesByRange(list[str] sortedTags, int total=40) {
+	list[int] tickIndex = [0];
+	int intervalSize = size(sortedTags) / total;
+	for (i <- index(sortedTags), i % intervalSize == 0) {
+		tickIndex = tickIndex + i;
+	}
+	if (tickIndex[-1] != size(sortedTags)-1) {
+		tickIndex = tickIndex + (size(sortedTags)-1);
+	}
+	return tickIndex;
+}
+
+public list[str] getTagsByDate(rel[str product, str version] corpus, rel[str product, str version, datetime commitDate] tagDates, str s) {
+	// Get all the tags/versions for this system s
+	tags = corpus[s];
+
+	// Load the dates for the tags
+	dates = tagDates[s];
+
+	bool sortTagsByDate(str t1, str t2) {
+		d1 = getOneFrom(dates[t1]);
+		d2 = getOneFrom(dates[t2]);
+		return d1 < d2;
+	}
+
+	sortedTags = sort(toList(tags), sortTagsByDate);
+	return sortedTags;
+}
+
+public void exportVarFeatureChart(str s, map[str,VarFeatureCounts] counts, loc saveTo, 
+	str systemName, list[str] markExtra=["mark phase=1","mark repeat=10","mark size=1pt"],
+	bool sortByDate = false) {
+	// Get all the tags/versions for this system s
+	corpus = loadTags();
+	tags = corpus[s];
+
+	// Load the dates for the tags
+	allDates = getTagDates(corpus);
+	dates = allDates[s];
+
+	// Sort the tags either by date or by version. Sorting by date tends to
+	// lead to odd graphs since there may be multiple major releases being
+	// updated at the same time, but they may have very different feature
+	// profiles. So, be warned...
+	sortedTags = sortByDate ? getTagsByDate(corpus, allDates, s) : sortTags(tags);
+
+	list[int] tickIndex = [ ];
+	if (sortByDate) {
+		// Find points at 6 month intervals
+		tickIndex = computeTickIndexesByDate(sortedTags, dates, monthsApart=6);
+	} else {
+		// Divide the tags into an even number of spaces
+		tickIndex = computeTickIndexesByRange(sortedTags, total=40);
+	}
+
+	// Get back the lists of counts, needed for coordinates
+	vv = [ < i, counts[sortedTags[i]].varVar > | i <- index(sortedTags) ];
+	vfc = [ < i, counts[sortedTags[i]].varFCall > | i <- index(sortedTags) ];
+	vmc = [ < i, counts[sortedTags[i]].varMCall > | i <- index(sortedTags) ];
+	vn = [ < i, counts[sortedTags[i]].varNew > | i <- index(sortedTags) ];
+	vp = [ < i, counts[sortedTags[i]].varProp > | i <- index(sortedTags) ];
+	vcc = [ < i, counts[sortedTags[i]].varClassConst > | i <- index(sortedTags) ];
+	vsc = [ < i, counts[sortedTags[i]].varStaticCall > | i <- index(sortedTags) ];
+	vst = [ < i, counts[sortedTags[i]].varStaticTarget > | i <- index(sortedTags) ];
+	vspn = [ < i, counts[sortedTags[i]].varStaticPropertyName > | i <- index(sortedTags) ];
+	vspt = [ < i, counts[sortedTags[i]].varStaticPropertyTarget > | i <- index(sortedTags) ];
+
+	// Configure the blocks of coordinates that will be plotted
+	list[str] coordinateBlocks = [ ];
+	if (max(vv<1>) > 5)
+		coordinateBlocks += makeCoords(vv, mark="square", markExtra=markExtra, legend="V");
+	if (max(vfc<1>) > 5)
+		coordinateBlocks += makeCoords(vfc, mark="x", markExtra=markExtra, legend="FC");
+	if (max(vmc<1>) > 5)
+		coordinateBlocks += makeCoords(vmc, mark="o", markExtra=markExtra, legend="MC");
+	if (max(vn<1>) > 5)
+		coordinateBlocks += makeCoords(vn, mark="+", markExtra=markExtra, legend="OC");
+	if (max(vp<1>) > 5)
+		coordinateBlocks += makeCoords(vp, mark="*", markExtra=markExtra, legend="P");
+	if (max(vcc<1>) > 5)
+		coordinateBlocks += makeCoords(vcc, mark="triangle", markExtra=markExtra, legend="CC");
+	if (max(vsc<1>) > 5)
+		coordinateBlocks += makeCoords(vsc, mark="pentagon", markExtra=markExtra, legend="SC");
+	if (max(vst<1>) > 5)
+		coordinateBlocks += makeCoords(vst, mark="diamond", markExtra=markExtra, legend="SCT");
+	if (max(vspn<1>) > 5)
+		coordinateBlocks += makeCoords(vspn, mark="otimes", markExtra=markExtra, legend="SP");
+	if (max(vspt<1>) > 5)
+		coordinateBlocks += makeCoords(vspt, mark="oplus", markExtra=markExtra, legend="SPT");
+
+	// Compute the maximum y coordinate
+	int maxY = max(vv<1>+vfc<1>+vmc<1>+vn<1>+vp<1>+vcc<1>+vsc<1>+vst<1>+vspn<1>+vspt<1>)+10;
+
+	str res = "\\begin{tikzpicture}
+			  '\\begin{axis}[width=\\textwidth,height=.25\\textheight,try min ticks={5},xlabel=<systemName> Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<tickIndex[-1]>,ymax=<maxY>,legend style={font=\\tiny,at={(0,1)},anchor=north west},xmajorgrids,x tick label style={rotate=90,anchor=east,font=\\tiny},<computeXTicks(tickIndex)>,<computeTickLabels(sortedTags,tickIndex)>]
 			  '<for (cb <- coordinateBlocks) {> <cb> <}>
 			  '\\end{axis}
 			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure*}
 			  ";
-	return res;	
+
+	writeFileLines(saveTo, [res]);
 }
 
-public str varFeaturesScaledChart(map[str,map[str,Summary]] smap, str s, str title="Variable Features Scaled", str label="fig:VarFeaturesScaled", str markExtra="") {
+public void exportMagicMethodsChart(str s, map[str,MagicMethodCounts] counts, loc saveTo, 
+	str systemName, list[str] markExtra=["mark phase=1","mark repeat=10","mark size=1pt"],
+	bool sortByDate = false) {
+	// Get all the tags/versions for this system s
+	corpus = loadTags();
+	tags = corpus[s];
+
+	// Load the dates for the tags
+	allDates = getTagDates(corpus);
+	dates = allDates[s];
+
+	// Sort the tags either by date or by version. Sorting by date tends to
+	// lead to odd graphs since there may be multiple major releases being
+	// updated at the same time, but they may have very different feature
+	// profiles. So, be warned...
+	sortedTags = sortByDate ? getTagsByDate(corpus, allDates, s) : sortTags(tags);
+
+	list[int] tickIndex = [ ];
+	if (sortByDate) {
+		// Find points at 6 month intervals
+		tickIndex = computeTickIndexesByDate(sortedTags, dates, monthsApart=6);
+	} else {
+		// Divide the tags into an even number of spaces
+		tickIndex = computeTickIndexesByRange(sortedTags, total=40);
+	}
+
+	// Get back the lists of counts, needed for coordinates
+	mset = [ < i, counts[sortedTags[i]].sets > | i <- index(sortedTags) ];
+	mget = [ < i, counts[sortedTags[i]].gets > | i <- index(sortedTags) ];
+	mis = [ < i, counts[sortedTags[i]].isSets > | i <- index(sortedTags) ];
+	mun = [ < i, counts[sortedTags[i]].unsets > | i <- index(sortedTags) ];
+	mc = [ < i, counts[sortedTags[i]].calls > | i <- index(sortedTags) ];
+	msc = [ < i, counts[sortedTags[i]].staticCalls > | i <- index(sortedTags) ];
+
+	// Configure the blocks of coordinates that will be plotted
 	list[str] coordinateBlocks = [ ];
-	slocInfo = sloc();
+	if (max(mset<1>) > 0)
+		coordinateBlocks += makeCoords(mset, mark="square", markExtra=markExtra, legend="S");
+	if (max(mget<1>) > 0)
+		coordinateBlocks += makeCoords(mget, mark="x", markExtra=markExtra, legend="G");
+	if (max(mis<1>) > 0)
+		coordinateBlocks += makeCoords(mis, mark="o", markExtra=markExtra, legend="I");
+	if (max(mun<1>) > 0)
+		coordinateBlocks += makeCoords(mun, mark="otimes", markExtra=markExtra, legend="U");
+	if (max(mc<1>) > 0)
+		coordinateBlocks += makeCoords(mc, mark="*", markExtra=markExtra, legend="C");
+	if (max(msc<1>) > 0)
+		coordinateBlocks += makeCoords(msc, mark="triangle", markExtra=markExtra, legend="SC");
+
+	// Compute the maximum y coordinate
+	int maxY = max(mset<1> + mget<1> + mis<1> + mun<1> + mc<1> + msc<1>)+10;
+
+	str res = "\\begin{tikzpicture}
+			  '\\begin{axis}[width=\\textwidth,height=.25\\textheight,try min ticks={5},xlabel=<systemName> Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<tickIndex[-1]>,ymax=<maxY>,legend style={font=\\tiny,at={(0,1)},anchor=north west},xmajorgrids,x tick label style={rotate=90,anchor=east,font=\\tiny},<computeXTicks(tickIndex)>,<computeTickLabels(sortedTags,tickIndex)>]
+			  '<for (cb <- coordinateBlocks) {> <cb> <}>
+			  '\\end{axis}
+			  '\\end{tikzpicture}
+			  ";
+
+	writeFileLines(saveTo, [res]);
+}
+
+public void exportEvalsInvocationsChart(str s, map[str,EvalLikeCounts] evals, 
+	map[str,InvocationCounts] invocations, loc saveTo, 
+	str systemName, list[str] markExtra=["mark phase=1","mark repeat=10","mark size=1pt"],
+	bool sortByDate = false) {
+	// Get all the tags/versions for this system s
+	corpus = loadTags();
+	tags = corpus[s];
+
+	// Load the dates for the tags
+	allDates = getTagDates(corpus);
+	dates = allDates[s];
+
+	// Sort the tags either by date or by version. Sorting by date tends to
+	// lead to odd graphs since there may be multiple major releases being
+	// updated at the same time, but they may have very different feature
+	// profiles. So, be warned...
+	sortedTags = sortByDate ? getTagsByDate(corpus, allDates, s) : sortTags(tags);
+
+	list[int] tickIndex = [ ];
+	if (sortByDate) {
+		// Find points at 6 month intervals
+		tickIndex = computeTickIndexesByDate(sortedTags, dates, monthsApart=6);
+	} else {
+		// Divide the tags into an even number of spaces
+		tickIndex = computeTickIndexesByRange(sortedTags, total=40);
+	}
+
+	// Get back the lists of counts, needed for coordinates
+	evalc = [ < i, evals[sortedTags[i]].evalCount > | i <- index(sortedTags) ];
+	cfunc = [ < i, evals[sortedTags[i]].createFunctionCount > | i <- index(sortedTags) ];
+	calluf = [ < i, invocations[sortedTags[i]].callUserFuncCount > | i <- index(sortedTags) ];
+	callufa = [ < i, invocations[sortedTags[i]].callUserFuncArrayCount > | i <- index(sortedTags) ];
+	callum = [ < i, invocations[sortedTags[i]].callUserMethodCount > | i <- index(sortedTags) ];
+	calluma = [ < i, invocations[sortedTags[i]].callUserMethodArrayCount > | i <- index(sortedTags) ];
+	fwdsc = [ < i, invocations[sortedTags[i]].forwardStaticCallCount > | i <- index(sortedTags) ];
+	fwdsca = [ < i, invocations[sortedTags[i]].forwardStaticCallArrayCount > | i <- index(sortedTags) ];
+
+	// Configure the blocks of coordinates that will be plotted
+	list[str] coordinateBlocks = [ ];
+	if (max(evalc<1>) > 0)
+		coordinateBlocks += makeCoords(evalc, mark="square", markExtra=markExtra, legend="E");
+	if (max(cfunc<1>) > 0)
+		coordinateBlocks += makeCoords(cfunc, mark="x", markExtra=markExtra, legend="CF");
+	if (max(calluf<1>) > 0)
+		coordinateBlocks += makeCoords(calluf, mark="o", markExtra=markExtra, legend="UF");
+	if (max(callufa<1>) > 0)
+		coordinateBlocks += makeCoords(callufa, mark="otimes", markExtra=markExtra, legend="UFA");
+	if (max(callum<1>) > 0)
+		coordinateBlocks += makeCoords(callum, mark="*", markExtra=markExtra, legend="UM");
+	if (max(calluma<1>) > 0)
+		coordinateBlocks += makeCoords(calluma, mark="triangle", markExtra=markExtra, legend="UMA");
+	if (max(fwdsc<1>) > 0)
+		coordinateBlocks += makeCoords(fwdsc, mark="pentagon", markExtra=markExtra, legend="SC");
+	if (max(fwdsca<1>) > 0)
+		coordinateBlocks += makeCoords(fwdsca, mark="diamond", markExtra=markExtra, legend="SCA");
+
+	// Compute the maximum y coordinate
+	int maxY = max(evalc<1> + cfunc<1> + calluf<1> + callufa<1> + callum<1> + calluma<1> + fwdsc<1> + fwdsca<1>)+10;
+
+	str res = "\\begin{tikzpicture}
+			  '\\begin{axis}[width=\\textwidth,height=.25\\textheight,try min ticks={5},xlabel=<systemName> Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<tickIndex[-1]>,ymax=<maxY>,legend style={font=\\tiny,at={(0,1)},anchor=north west},xmajorgrids,x tick label style={rotate=90,anchor=east,font=\\tiny},<computeXTicks(tickIndex)>,<computeTickLabels(sortedTags,tickIndex)>]
+			  '<for (cb <- coordinateBlocks) {> <cb> <}>
+			  '\\end{axis}
+			  '\\end{tikzpicture}
+			  ";
+
+	writeFileLines(saveTo, [res]);
+}
+
+public rel[str product, str version, loc path, int featureCount] fillCountsRel(rel[str product, str version] corpus) {
+	rel[str product, str version, loc path, int featureCount] fileCounts = { };
+	for (p <- corpus<0>, v <- corpus[p]) {
+		fsum = readSummary(p,v);
+
+		map[loc,int] countsPerFile = ( );
+
+		// Get file paths and counts of var features
+		for ( <l,i> <- fsum.varFeatures.features ) {
+			if (l.top in countsPerFile) {
+				countsPerFile[l.top] = countsPerFile[l.top] + 1;
+			} else {
+				countsPerFile[l.top] = 1;
+			}
+		}	
+
+		// and magic methods...
+		for ( <l,i> <- fsum.magicMethods.methods ) {
+			if (l.top in countsPerFile) {
+				countsPerFile[l.top] = countsPerFile[l.top] + 1;
+			} else {
+				countsPerFile[l.top] = 1;
+			}
+		}	
+
+		// and invocations...
+		for ( <l,i> <- fsum.invocations.invocations ) {
+			if (l.top in countsPerFile) {
+				countsPerFile[l.top] = countsPerFile[l.top] + 1;
+			} else {
+				countsPerFile[l.top] = 1;
+			}
+		}	
+
+		// and eval-likes, but not closures... 
+		for ( <l,i> <- fsum.evalLikes.evalLikes, !(i is closureItem) ) {
+			if (l.top in countsPerFile) {
+				countsPerFile[l.top] = countsPerFile[l.top] + 1;
+			} else {
+				countsPerFile[l.top] = 1;
+			}
+		}
+
+		// and now add all this into the relation
+		for (l <- countsPerFile) {
+			fileCounts = fileCounts + < p, v, l, countsPerFile[l] >;
+		}
+	}
+
+	return fileCounts;
+}
+
+public void exportFileInfoChart(rel[str product, str version] corpus, loc saveTo, 
+	rel[str product, str version, loc path, int featureCount] crel = { },
+	list[str] markExtra=["mark phase=1","mark repeat=10","mark size=1pt"]) {
+
+	rel[str product, str version, loc path, int featureCount] featuresPerFileRel  = crel;
+	if (size(crel) == 0) {
+		featuresPerFileRel = fillCountsRel(corpus);
+	}
+
+	rel[str product, str version, int fileCount] fileCounts = { };
+	for (p <- featuresPerFileRel<0>, v <- featuresPerFileRel[p]<0>) {
+		int fileCount = size( (featuresPerFileRel[p,v])<0> );
+		fileCounts = fileCounts + < p, v, fileCount >;
+	}
+
+	rel[str product, str version, real featureCount] featureCounts = { };
+	for (p <- featuresPerFileRel<0>, v <- featuresPerFileRel[p]<0>) {
+		list[int] featureCountList = sort([ n | <l,n> <- featuresPerFileRel[p,v] ]) ;
+		listSize = size(featureCountList);
+		real median = 0.0;
+		if (listSize % 2 == 0) {
+			median = (featureCountList[listSize/2] + featureCountList[listSize/2-1])/2.0;
+		} else {
+			median = featureCountList[listSize/2] * 1.0;
+		}
+		featureCounts = featureCounts + < p, v, floor(fitFloat(median) * 100) / 100.0 >;
+	}
+
+	map[str,list[str]] sortedTagMap = ( );
+	for (p <- corpus<0>) {
+		sortedTagMap[p] = sortTags(corpus[p]);
+	}
+
+	mostVersions = max([size(sortedTagMap[p]) | p <- sortedTagMap<0> ]);
+	deltaForMD = (1.0*(mostVersions-1))/(size(sortedTagMap["moodle"])-1);
+	deltaForMW = (1.0*(mostVersions-1))/(size(sortedTagMap["mediawiki"])-1);
+	deltaForBB = (1.0*(mostVersions-1))/(size(sortedTagMap["phpBB"])-1);
+	deltaForWP = (1.0*(mostVersions-1))/(size(sortedTagMap["wordpress"])-1);
 	
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varVar * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="square", markExtra=markExtra, legend="Variables");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varFCall * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="x", markExtra=markExtra, legend="Function Calls");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varMCall * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="o", markExtra=markExtra, legend="Method Calls");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varNew * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="+", markExtra=markExtra, legend="Object Creation");
-	coordinateBlocks += makeCoords([ smap[s][v].varFeatures.varProp * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="*", markExtra=markExtra, legend="Property Uses");
-	num maxcoord(str s) {
-		return max([ smap[s][v].varFeatures.varVar * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].varFeatures.varFCall * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].varFeatures.varMCall * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].varFeatures.varNew * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].varFeatures.varProp * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ]) ;
-	}
-		
-	str res = "\\begin{figure}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\columnwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>]
-			  '<for (cb <- coordinateBlocks) {> <cb> <}>
-			  '\\end{axis}
-			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure}
-			  ";
-	return res;	
-}
+	sortedTags = [ "<i>" | i <- [0..mostVersions]];
+	tickIndex = computeTickIndexesByRange(sortedTags, total=40);
 
-public str magicMethodsChart(map[str,map[str,Summary]] smap, str s, str title="Magic Methods", str label="fig:MagicMethods", str markExtra="") {
-	list[str] coordinateBlocks = [ ];
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.sets | v <- getSortedVersions(s), v in smap[s] ], mark="x", markExtra=markExtra, legend="Property Sets");
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.gets | v <- getSortedVersions(s), v in smap[s] ], mark="o", markExtra=markExtra, legend="Property Gets");
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.calls | v <- getSortedVersions(s), v in smap[s] ], mark="+", markExtra=markExtra, legend="Calls");
-
-	int maxcoord(str s) {
-		return max([ smap[s][v].magicMethods.sets | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].magicMethods.gets | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].magicMethods.calls | v <- getSortedVersions(s), v in smap[s] ]) + 10;
-	}
-		
-	str res = "\\begin{figure}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\columnwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>]
-			  '<for (cb <- coordinateBlocks) {> <cb> <}>
-			  '\\end{axis}
-			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure}
-			  ";
-	return res;	
-}
-
-public str magicMethodsScaledChart(map[str,map[str,Summary]] smap, str s, str title="Magic Methods", str label="fig:MagicMethods", str markExtra="") {
-	list[str] coordinateBlocks = [ ];
-	slocInfo = sloc();
-
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.sets * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="x", markExtra=markExtra, legend="Property Sets");
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.gets * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="o", markExtra=markExtra, legend="Property Gets");
-	coordinateBlocks += makeCoords([ smap[s][v].magicMethods.calls * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="+", markExtra=markExtra, legend="Calls");
-	num maxcoord(str s) {
-		return max([ smap[s][v].magicMethods.sets * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].magicMethods.gets * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].magicMethods.calls * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ]);
-	}
-		
-	str res = "\\begin{figure}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\columnwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>]
-			  '<for (cb <- coordinateBlocks) {> <cb> <}>
-			  '\\end{axis}
-			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure}
-			  ";
-	return res;	
-}
-
-public str evalsChart(map[str,map[str,Summary]] smap, str s, str title="Magic Methods", str label="fig:MagicMethods", str markExtra="") {
-	list[str] coordinateBlocks = [ ];
-	coordinateBlocks += makeCoords([ smap[s][v].evalCounts.evalCount | v <- getSortedVersions(s), v in smap[s] ], mark="x", markExtra=markExtra, legend="eval Uses");
-	coordinateBlocks += makeCoords([ smap[s][v].evalCounts.createFunctionCount | v <- getSortedVersions(s), v in smap[s] ], mark="o", markExtra=markExtra, legend="create\\_function Uses");
-
-	int maxcoord(str s) {
-		return max([ smap[s][v].evalCounts.evalCount | v <- getSortedVersions(s), v in smap[s] ] +
-				   [ smap[s][v].evalCounts.createFunctionCount | v <- getSortedVersions(s), v in smap[s] ]) + 10;
-	}
-		
-	str res = "\\begin{figure}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\columnwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>]
-			  '<for (cb <- coordinateBlocks) {> <cb> <}>
-			  '\\end{axis}
-			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure}
-			  ";
-	return res;	
-}
-
-public str evalsScaledChart(map[str,map[str,Summary]] smap, str s, str title="Magic Methods", str label="fig:MagicMethods", str markExtra="") {
-	list[str] coordinateBlocks = [ ];
-	slocInfo = sloc();
-
-	coordinateBlocks += makeCoords([ smap[s][v].evalCounts.evalCount * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="x", markExtra=markExtra, legend="eval Uses");
-	coordinateBlocks += makeCoords([ smap[s][v].evalCounts.createFunctionCount * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ], mark="o", markExtra=markExtra, legend="create\\_function Uses");
-
-	num maxcoord(str s) {
-		return max([ smap[s][v].evalCounts.evalCount * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ] +
-				   [ smap[s][v].evalCounts.createFunctionCount * 100.0 / lineCount | v <- getSortedVersions(s), v in smap[s], < lineCount, fileCount > := getOneFrom(slocInfo[s,v]) ]);
-	}
-		
-	str res = "\\begin{figure}
-			  '\\centering
-			  '\\begin{tikzpicture}
-			  '\\begin{axis}[width=\\columnwidth,height=.25\\textheight,xlabel=Version,ylabel=Feature Count,xmin=1,ymin=0,xmax=<size(getSortedVersions(s))>,ymax=<maxcoord(s)>,legend style={at={(0,1)},anchor=north west},x tick label style={rotate=90,anchor=east},<computeTicks(s)>,<computeTickLabels(s)>}}]
-			  '<for (cb <- coordinateBlocks) {> <cb> <}>
-			  '\\end{axis}
-			  '\\end{tikzpicture}
-			  '\\caption{<title>.\\label{<label>}} 
-			  '\\end{figure}
-			  ";
-	return res;	
-}
-
-public map[str,map[str,Summary]] getSummaries(set[str] systems) {
-	return ( s : ( v : readSummary(s,v) | v <- getVersions(s) ) | s <- systems );
-}
-
-public void makeCharts() {
-	wpMarkExtra = "mark phase=1,mark repeat=5";
-	mwMarkExtra = "mark phase=1,mark repeat=10";
-	maMarkExtra = "mark phase=1,mark repeat=10";
+	featuresMD = [ < floor(fitFloat(i * deltaForMD)*100)/100.0, getOneFrom(featureCounts["moodle",v]) > | i <- index(sortedTagMap["moodle"]), v := sortedTagMap["moodle"][i] ];
+	filesMD = [ < floor(fitFloat(i * deltaForMD)*100)/100.0, getOneFrom(fileCounts["moodle",v]) > | i <- index(sortedTagMap["moodle"]), v := sortedTagMap["moodle"][i] ];
 	
-	smap = getSummaries({"WordPress"});
-	writeFile(|file:///tmp/wpVar.tex|, varFeaturesChart(smap, "WordPress", title="Variable Features in WordPress", label="fig:VFWP", markExtra=wpMarkExtra));
-	writeFile(|file:///tmp/wpVarScaled.tex|, varFeaturesScaledChart(smap, "WordPress", title="Variable Features in WordPress, Scaled by SLOC", label="fig:VFWPScaled", markExtra=wpMarkExtra));
-	writeFile(|file:///tmp/wpMagic.tex|, magicMethodsChart(smap, "WordPress", title="Magic Methods in WordPress", label="fig:MMWP", markExtra=wpMarkExtra));
-	writeFile(|file:///tmp/wpMagicScaled.tex|, magicMethodsScaledChart(smap, "WordPress", title="Magic Methods in WordPress, Scaled by SLOC", label="fig:MMWPScaled", markExtra=wpMarkExtra));
-	writeFile(|file:///tmp/wpEval.tex|, evalsChart(smap, "WordPress", title="Eval Constructs in WordPress", label="fig:EvalWP", markExtra=wpMarkExtra));
-	writeFile(|file:///tmp/wpEvalScaled.tex|, evalsScaledChart(smap, "WordPress", title="Eval Constructs in WordPress, Scaled by SLOC", label="fig:EvalWPScaled", markExtra=wpMarkExtra));
+	featuresMW = [ < floor(fitFloat(i * deltaForMW)*100)/100.0, getOneFrom(featureCounts["mediawiki",v]) > | i <- index(sortedTagMap["mediawiki"]), v := sortedTagMap["mediawiki"][i] ];
+	filesMW = [ < floor(fitFloat(i * deltaForMW)*100)/100.0, getOneFrom(fileCounts["mediawiki",v]) > | i <- index(sortedTagMap["mediawiki"]), v := sortedTagMap["mediawiki"][i] ];
 
-	smap = getSummaries({"MediaWiki"});
-	writeFile(|file:///tmp/mwVar.tex|, varFeaturesChart(smap, "MediaWiki", title="Variable Features in MediaWiki", label="fig:VFMW", markExtra=mwMarkExtra));
-	writeFile(|file:///tmp/mwVarScaled.tex|, varFeaturesScaledChart(smap, "MediaWiki", title="Variable Features in MediaWiki, Scaled by SLOC", label="fig:VFMWScaled", markExtra=mwMarkExtra));
-	writeFile(|file:///tmp/mwMagic.tex|, magicMethodsChart(smap, "MediaWiki", title="Magic Methods in MediaWiki", label="fig:MMMW", markExtra=mwMarkExtra));
-	writeFile(|file:///tmp/mwMagicScaled.tex|, magicMethodsScaledChart(smap, "MediaWiki", title="Magic Methods in MediaWiki, Scaled by SLOC", label="fig:MMMWScaled", markExtra=mwMarkExtra));
-	writeFile(|file:///tmp/mwEval.tex|, evalsChart(smap, "MediaWiki", title="Eval Constructs in MediaWiki", label="fig:EvalMW", markExtra=mwMarkExtra));
-	writeFile(|file:///tmp/mwEvalScaled.tex|, evalsScaledChart(smap, "MediaWiki", title="Eval Constructs in MediaWiki, Scaled by SLOC", label="fig:EvalMWScaled", markExtra=mwMarkExtra));
+	featuresBB = [ < floor(fitFloat(i * deltaForBB)*100)/100.0, getOneFrom(featureCounts["phpBB",v]) > | i <- index(sortedTagMap["phpBB"]), v := sortedTagMap["phpBB"][i] ];
+	filesBB = [ < floor(fitFloat(i * deltaForBB)*100)/100.0, getOneFrom(fileCounts["phpBB",v]) > | i <- index(sortedTagMap["phpBB"]), v := sortedTagMap["phpBB"][i] ];
 
-	smap = getSummaries({"phpMyAdmin"});
-	writeFile(|file:///tmp/maVar.tex|, varFeaturesChart(smap, "phpMyAdmin", title="Variable Features in phpMyAdmin", label="fig:VFMA", markExtra=maMarkExtra));
-	writeFile(|file:///tmp/maVarScaled.tex|, varFeaturesScaledChart(smap, "phpMyAdmin", title="Variable Features in phpMyAdmin, Scaled by SLOC", label="fig:VFMAScaled", markExtra=maMarkExtra));
-	writeFile(|file:///tmp/maMagic.tex|, magicMethodsChart(smap, "phpMyAdmin", title="Magic Methods in phpMyAdmin", label="fig:MMMA", markExtra=maMarkExtra));
-	writeFile(|file:///tmp/maMagicScaled.tex|, magicMethodsScaledChart(smap, "phpMyAdmin", title="Magic Methods in phpMyAdmin, Scaled by SLOC", label="fig:MMMAScaled", markExtra=maMarkExtra));
-	writeFile(|file:///tmp/maEval.tex|, evalsChart(smap, "phpMyAdmin", title="Eval Constructs in phpMyAdmin", label="fig:EvalMA", markExtra=maMarkExtra));
-	writeFile(|file:///tmp/maEvalScaled.tex|, evalsScaledChart(smap, "phpMyAdmin", title="Eval Constructs inphpMyAdmin, Scaled by SLOC", label="fig:EvalMAScaled", markExtra=maMarkExtra));
+	featuresWP = [ < floor(fitFloat(i * deltaForWP)*100)/100.0, getOneFrom(featureCounts["wordpress",v]) > | i <- index(sortedTagMap["wordpress"]), v := sortedTagMap["wordpress"][i] ];
+	filesWP = [ < floor(fitFloat(i * deltaForWP)*100)/100.0, getOneFrom(fileCounts["wordpress",v]) > | i <- index(sortedTagMap["wordpress"]), v := sortedTagMap["wordpress"][i] ];
+
+	list[str] coordinateBlocks1 = [ ];
+	list[str] coordinateBlocks2 = [ ];
+	coordinateBlocks1 += makeCoords(filesMD, mark="x", markExtra=markExtra, label="md_files", dashed=true);
+	coordinateBlocks2 += makeCoords(featuresMD, mark="square", markExtra=markExtra, legend="MD Features");
+	coordinateBlocks1 += makeCoords(filesMW, mark="otimes", markExtra=markExtra, label="mw_files", dashed=true);
+	coordinateBlocks2 += makeCoords(featuresMW, mark="o", markExtra=markExtra, legend="MW Features");
+	coordinateBlocks1 += makeCoords(filesBB, mark="triangle", markExtra=markExtra, label="bb_files", dashed=true);
+	coordinateBlocks2 += makeCoords(featuresBB, mark="*", markExtra=markExtra, legend="BB Features");
+	coordinateBlocks1 += makeCoords(filesWP, mark="diamond", markExtra=markExtra, label="wp_files", dashed=true);
+	coordinateBlocks2 += makeCoords(featuresWP, mark="pentagon", markExtra=markExtra, legend="WP Features");
+
+	// Compute the maximum y coordinate
+	int maxY1 = max(filesMD<1> + filesMW<1> + filesBB<1> + filesWP<1>)+10;
+	int maxY2 = round(max(featuresMD<1> + featuresMW<1> + featuresBB<1> + featuresWP<1>))+2;
+
+	str res = "\\begin{tikzpicture}
+			  '\\begin{axis}[axis y line*=right,width=\\textwidth,height=.25\\textheight,try min ticks={5},xlabel=Scaled Release History,ylabel=File Count,xmin=1,ymin=0,xmax=<tickIndex[-1]>,ymax=<maxY1>,xmajorgrids,x tick label style={font=\\tiny},<computeXTicks(tickIndex)>,<computeTickLabels(sortedTags,tickIndex)>]
+			  '<for (cb <- coordinateBlocks1) {> <cb> <}>
+			  '\\end{axis}
+			  '\\begin{axis}[axis y line*=left,width=\\textwidth,height=.25\\textheight,try min ticks={5},ylabel=Median Features per File,xmin=1,ymin=0,xmax=<tickIndex[-1]>,ymax=<maxY2>,legend style={font=\\tiny,at={(0,1)},anchor=north west},axis x line=none,<computeXTicks(tickIndex)>,xticklabels={}]
+			  '\\addlegendimage{/pgfplots/refstyle=md_files}\\addlegendentry{MD Files}
+			  '\\addlegendimage{/pgfplots/refstyle=mw_files}\\addlegendentry{MW Files}
+			  '\\addlegendimage{/pgfplots/refstyle=bb_files}\\addlegendentry{BB Files}
+			  '\\addlegendimage{/pgfplots/refstyle=wp_files}\\addlegendentry{WP Files}
+			  '<for (cb <- coordinateBlocks2) {> <cb> <}>
+			  '\\end{axis}
+			  '\\end{tikzpicture}
+			  ";
+
+	writeFileLines(saveTo, [res]);
 }
 
+@doc{
+	Generate and save all charts showing the use of dynamic features 
+	and the chart showing the median feature count/total file count.
+}
+public void makeCharts(loc exportLoc, 
+	map[str, VarFeatureCounts] vcmapWP = ( ), 
+	map[str, VarFeatureCounts] vcmapMD = ( ),
+	map[str, VarFeatureCounts] vcmapMW = ( ), 
+	map[str, VarFeatureCounts] vcmapBB = ( ),
+	map[str, MagicMethodCounts] mmmapWP = ( ),
+	map[str, MagicMethodCounts] mmmapMD = ( ),
+	map[str, MagicMethodCounts] mmmapMW = ( ),
+	map[str, MagicMethodCounts] mmmapBB = ( ),
+	map[str, EvalLikeCounts] emapWP = ( ),
+	map[str, EvalLikeCounts] emapMD = ( ),
+	map[str, EvalLikeCounts] emapMW = ( ),
+	map[str, EvalLikeCounts] emapBB = ( ),
+	map[str, InvocationCounts] imapWP = ( ),
+	map[str, InvocationCounts] imapMD = ( ),
+	map[str, InvocationCounts] imapMW = ( ),
+	map[str, InvocationCounts] imapBB = ( ),
+	rel[str product, str version, loc path, int featureCount] crel = { }) {
+
+	corpus = loadTags();
+
+	if (size(vcmapWP) == 0)
+		vcmapWP = getVarFeatureCountsMap("wordpress", corpus["wordpress"]);
+	
+	if (size(vcmapMD) == 0)
+		vcmapMD = getVarFeatureCountsMap("moodle", corpus["moodle"]);
+	
+	if (size(vcmapMW) == 0)
+		vcmapMW = getVarFeatureCountsMap("mediawiki", corpus["mediawiki"]);
+	
+	if (size(vcmapBB) == 0)
+		vcmapBB = getVarFeatureCountsMap("phpBB", corpus["phpBB"]);
+
+	if (size(mmmapWP) == 0)
+		mmmapWP = getMagicMethodCountsMap("wordpress", corpus["wordpress"]);
+
+	if (size(mmmapMD) == 0)
+		mmmapMD = getMagicMethodCountsMap("moodle", corpus["moodle"]);
+
+	if (size(mmmapMW) == 0)
+		mmmapMW = getMagicMethodCountsMap("mediawiki", corpus["mediawiki"]);
+
+	if (size(mmmapBB) == 0)
+		mmmapBB = getMagicMethodCountsMap("phpBB", corpus["phpBB"]);
+
+	if (size(emapWP) == 0)
+		mmmapWP = getEvalCountsMap("wordpress", corpus["wordpress"]);
+
+	if (size(emapMD) == 0)
+		mmmapMD = getEvalCountsMap("moodle", corpus["moodle"]);
+
+	if (size(emapMW) == 0)
+		mmmapMW = getEvalCountsMap("mediawiki", corpus["mediawiki"]);
+
+	if (size(emapBB) == 0)
+		mmmapBB = getEvalCountsMap("phpBB", corpus["phpBB"]);
+
+	if (size(imapWP) == 0)
+		mmmapWP = getInvocationCountsMap("wordpress", corpus["wordpress"]);
+
+	if (size(imapMD) == 0)
+		mmmapMD = getInvocationCountsMap("moodle", corpus["moodle"]);
+
+	if (size(imapMW) == 0)
+		mmmapMW = getInvocationCountsMap("mediawiki", corpus["mediawiki"]);
+
+	if (size(imapBB) == 0)
+		mmmapBB = getInvocationCountsMap("phpBB", corpus["phpBB"]);
+
+	if (size(crel) == 0)
+		crel = fillCountsRel(corpus);
+
+	exportVarFeatureChart("wordpress", vcmapWP, exportLoc + "wpVar.tex", "WordPress");
+	exportVarFeatureChart("mediawiki", vcmapMW, exportLoc + "mwVar.tex", "MediaWiki");
+	exportVarFeatureChart("moodle", vcmapMD, exportLoc + "mdVar.tex", "Moodle");
+	exportVarFeatureChart("phpBB", vcmapBB, exportLoc + "bbVar.tex", "phpBB");
+
+	exportMagicMethodsChart("wordpress", mmmapWP, exportLoc + "wpMagic.tex", "WordPress");
+	exportMagicMethodsChart("mediawiki", mmmapMW, exportLoc + "mwMagic.tex", "MediaWiki");
+	exportMagicMethodsChart("moodle", mmmapMD, exportLoc + "mdMagic.tex", "Moodle");
+	exportMagicMethodsChart("phpBB", mmmapBB, exportLoc + "bbMagic.tex", "phpBB");
+	
+	exportEvalsInvocationsChart("wordpress", emapWP, imapWP, exportLoc + "wpEval.tex", "WordPress");
+	exportEvalsInvocationsChart("mediawiki", emapMW, imapMW, exportLoc + "mwEval.tex", "MediaWiki");
+	exportEvalsInvocationsChart("moodle", emapMD, imapMD, exportLoc + "mdEval.tex", "Moodle");
+	exportEvalsInvocationsChart("phpBB", emapBB, imapBB, exportLoc + "bbEval.tex", "phpBB");
+
+	exportFileInfoChart(corpus, exportLoc + "features-and-files.tex", crel=crel);
+}
+
+@doc{
+	Location of the cloc binary.
+	TODO: Adjust this if your cloc is in a different location.
+}
 private loc clocBinaryLoc = |file:///opt/homebrew/bin/cloc|;
+
+@doc{
+	Location of where to store extracted SLOC information.
+}
 private loc slocLoc = baseLoc + "serialized/sloc";
 
+@doc{
+	Compute SLOC for all systems in the corpus.
+}
 public void computeCorpusCLOC() {	
 	for (p <- repositories<0>, v <- getTags(repositories[p])) {
 		switchToTag(repositories[p], v);
@@ -856,6 +1173,9 @@ public void computeCorpusCLOC() {
 	}
 }
 
+@doc{
+	Type to represent SLOC for multiple systems and versions.
+}
 alias ClocRel = rel[str product, str version, ClocResult clocResult];
 
 @doc{
@@ -890,10 +1210,17 @@ public ClocRel loadClocResults() {
 	return result;
 }
 
+@doc{
+	Restrict the computed results to a subset of products and versions.
+}
 public ClocRel restrictClocResultsToCorpus(ClocRel clocRel, rel[str product,str version] tags) {
 	return { < p, v, r > | < p, v, r > <- clocRel, <p, v > in tags };
 }
 
+@doc{
+	Create a ClocResult that includes the sums across all included versions of the same
+	product in ClocRel. This will return one ClocResult for each product.
+}
 public map[str,ClocResult] summarizeClocResultsByProduct(ClocRel clocRel = { }) {
 	map[str,ClocResult] result = ( );
 
@@ -915,6 +1242,10 @@ public map[str,ClocResult] summarizeClocResultsByProduct(ClocRel clocRel = { }) 
 	return result;
 }
 
+@doc{
+	Create a ClocResult that includes the sums across all included versions of all
+	products in ClocRel. This returns a single ClocResult that contains the sums.
+}
 public ClocResult summarizeClocResults(ClocRel clocRel = { }) {
 	ClocResult result = clocResult(0,0,0,0);
 
@@ -932,10 +1263,18 @@ public ClocResult summarizeClocResults(ClocRel clocRel = { }) {
 	return result;
 }
 
+@doc{
+	Get the date of each commit for each product and release in corpus. This is
+	done by checking the commit date in Git.
+}
 public rel[str product, str version, datetime commitDate] getTagDates(rel[str product, str version] corpus) {
 	rel[str product, str version, datetime commitDate] result = { };
 	for (<p,v> <- corpus) {
 		result = result + < p, v, getTagCommitInfo(repositories[p], v) >;
 	}
 	return result;
+}
+
+public list[str] sortTags(set[str] tags) {
+	return sort(toList(tags), compareVersion);
 }
